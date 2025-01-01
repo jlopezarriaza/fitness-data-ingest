@@ -8,6 +8,7 @@ import webbrowser
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable, Dict, Tuple, Any, Optional, List
+from botocore.exceptions import ClientError
 
 import boto3
 import numpy as np
@@ -29,6 +30,7 @@ from requests.exceptions import HTTPError
 from requests_oauthlib import OAuth2Session
 from urllib3.util.retry import Retry
 
+
 logging.basicConfig(level=logging.INFO)
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
@@ -39,6 +41,52 @@ RETRY_STRATEGY = Retry(
     status_forcelist=[500, 502, 503, 504],
     allowed_methods=["GET", "POST"],
 )
+
+
+def list_s3_files(
+    s3_client: boto3.client, bucket_name: str, prefix: str = ""
+) -> list[dict]:
+    """
+    List all files in an S3 bucket.
+
+    Parameters
+    ----------
+    s3_client : boto3.client
+        The S3 client used to interact with the S3 service.
+    bucket_name : str
+        Name of the S3 bucket.
+    prefix : str, optional
+        Optional prefix to filter results (folder path).
+
+    Returns
+    -------
+    list[dict]
+        List of dictionaries containing file information.
+    """
+    try:
+
+        # List all objects in the bucket
+        files = []
+        paginator = s3_client.get_paginator("list_objects_v2")
+
+        # Handle pagination
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    files.append(
+                        {
+                            "Key": obj["Key"],
+                            "Size": obj["Size"],
+                            "LastModified": obj["LastModified"],
+                            "StorageClass": obj["StorageClass"],
+                        }
+                    )
+
+        return files
+
+    except ClientError as e:
+        print(f"Error: {e}")
+        return None
 
 
 def file_exists(s3_client: boto3.client, bucket_name: str, file_name: str) -> bool:
@@ -162,14 +210,24 @@ def fetch_and_save_data(
     """
     date_sequence = pd.date_range(start=start_date, end=end_date).to_list()
     date_sequence.reverse()
-
+    all_files_dict = {
+        f"{resource}": [
+            x["Key"]
+            for x in list_s3_files(
+                s3_client,
+                "juan.lopez.arriaza-fitbit-data",
+                f"intraday/{resource}/",
+            )
+        ]
+        for resource in INTRADAY_RESOURCES
+    }
     for this_date in date_sequence:
         logging.info(f'Getting data for {this_date.strftime("%Y-%m-%d")}')
         for resource in INTRADAY_RESOURCES:
             key_path = f'intraday/{resource}/{resource}_{this_date.strftime("%Y-%m-%d")}.parquet'
             save_file_path = f"s3://{bucket_name}/" + key_path
 
-            if file_exists(s3_client, bucket_name, key_path):
+            if key_path in all_files_dict[resource]:
                 logging.info(f"File exists for {key_path}")
                 continue
 
@@ -384,7 +442,7 @@ def get_fitbit_thirty_day_resource_endpoint(
 
     """
     start_date_str = start_date.strftime("%Y-%m-%d")
-    end_date = start_date + datetime.timedelta(days=29)
+    end_date = start_date + timedelta(days=29)
     end_date_str = end_date.strftime("%Y-%m-%d")
 
     api_endpoint_dict = {
@@ -414,3 +472,53 @@ THIRTY_DAY_ENDPOINTS: Dict[str, Callable[[datetime.date], str]] = (
         for resource in THIRTY_DAY_RESOURCES
     }
 )
+
+
+def fetch_and_save_30_day_data(
+    s3_client: boto3.client,
+    fitbit: OAuth2Session,
+    api_url: str,
+    bucket_name: str,
+) -> None:
+    """Fetches Fitbit data and saves it to S3.
+
+    Parameters
+    ----------
+    s3_client : boto3.client
+        Boto3 S3 client.
+    fitbit : OAuth2Session
+        Fitbit OAuth2 session.
+    start_date : datetime
+        Start date for data retrieval.
+    end_date : datetime
+        End date for data retrieval.
+    bucket_name : str
+        Name of the S3 bucket.
+
+    Returns
+    -------
+    None
+    """
+    all_files_dict = {
+        f"{resource}": [
+            x["Key"]
+            for x in list_s3_files(
+                s3_client,
+                "juan.lopez.arriaza-fitbit-data",
+                f"intraday/{resource}/",
+            )
+        ]
+        for resource in INTRADAY_RESOURCES
+    }
+    
+    for this_date in date_sequence:
+        logging.info(f'Getting data for {this_date.strftime("%Y-%m-%d")}')
+        for resource in INTRADAY_RESOURCES:
+            key_path = f'intraday/{resource}/{resource}_{this_date.strftime("%Y-%m-%d")}.parquet'
+            save_file_path = f"s3://{bucket_name}/" + key_path
+
+            if key_path in all_files_dict[resource]:
+                logging.info(f"File exists for {key_path}")
+                continue
+
+            process_resource_data(fitbit, resource, this_date, save_file_path)
