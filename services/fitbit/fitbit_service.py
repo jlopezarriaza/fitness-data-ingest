@@ -21,7 +21,7 @@ def main():
     s3 = boto3.client("s3")
 
     start_date_str = "2017-01-10"
-    end_date_str = "2024-12-16"
+    end_date_str = "2025-01-05"
 
     try:
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
