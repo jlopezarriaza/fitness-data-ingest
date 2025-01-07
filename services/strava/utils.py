@@ -17,13 +17,14 @@ import requests
 from botocore.exceptions import ClientError
 from flask import Flask, request
 from folium import plugins
+
 from globals import (
+    API_URL,
     AUTHORIZATION_BASE_URL,
     BASE_STREAM_TYPES,
     PERSONAL_BUCKET_NAME,
     STREAM_SCHEMA,
     TOKEN_URL,
-    API_URL,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -291,14 +292,6 @@ def list_s3_files(
         return None
 
 
-def file_exists(s3_client: boto3.client, bucket_name, file_name):
-    try:
-        s3_client.head_object(Bucket=bucket_name, Key=file_name)
-        return True
-    except Exception as e:
-        return False
-
-
 def get_single_streamdata(
     access_token: str,
     activity_id: int,
@@ -369,7 +362,11 @@ def get_single_streamdata(
     else:
         stream_df["latlng"] = [[None, None] for x in stream_df.index]
     stream_df = stream_df.assign(
-        **{one_key: None for one_key in keys + ['latitude', 'longitude'] if one_key not in stream_df.columns}
+        **{
+            one_key: None
+            for one_key in keys + ["latitude", "longitude"]
+            if one_key not in stream_df.columns
+        }
     )
     logging.info(f"Writing data for activity {activity_id}")
     stream_table = pa.Table.from_pandas(

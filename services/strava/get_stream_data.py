@@ -18,11 +18,39 @@ logging.basicConfig(level=logging.INFO)
 access_token = get_access_token()
 
 
+import argparse
+from datetime import date, timedelta
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch Strava stream data.")
+    parser.add_argument("--start_date", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end_date", type=str, help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--since_date", type=str, help="Date since when to fetch data (YYYY-MM-DD)"
+    )
+
+    args = parser.parse_args()
+
+    start_date_str = args.start_date
+    end_date_str = args.end_date
+    since_date_str = args.since_date
+
+    if start_date_str and end_date_str:
+        start_date = date.fromisoformat(start_date_str)
+        end_date = date.fromisoformat(end_date_str)
+    elif since_date_str:
+        since_date = date.fromisoformat(since_date_str)
+        start_date = since_date
+        end_date = date.today()
+    else:
+        start_date = None
+        end_date = None
+
     s3 = boto3.client("s3")
+
     streams_key_path = f'strava/streams/all_strava_streams_{datetime.now().strftime("%Y-%m-%d")}.parquet'
     streams_save_file_path = f"s3://{PERSONAL_BUCKET_NAME}/" + streams_key_path
-    
+
     activities_files = list_s3_files(s3, PERSONAL_BUCKET_NAME, "strava/activities/")
 
     file_dates = [
@@ -33,11 +61,19 @@ if __name__ == "__main__":
     ]
     latest_file = activities_files[np.argmax(file_dates)]["Key"]
 
-    activities_dataframe = activities_dataframe = pd.read_parquet(
-        f"s3://{PERSONAL_BUCKET_NAME}/{latest_file}"
+    activities_dataframe = pd.read_parquet(f"s3://{PERSONAL_BUCKET_NAME}/{latest_file}")
+    activities_dataframe["start_date_local"] = pd.to_datetime(
+        activities_dataframe["start_date_local"]
     )
+    if start_date:
+        activities_dataframe = activities_dataframe.query(
+            "start_date_local.dt.date >= @start_date"
+        )
+    if end_date:
+        activities_dataframe = activities_dataframe.query(
+            "start_date_local.dt.date <= @end_date"
+        )
     activity_ids = activities_dataframe["id"].drop_duplicates().to_list()
-
     stream_df = get_streamdata(
         s3_client=s3, access_token=access_token, activity_ids=activity_ids
     )
@@ -48,7 +84,7 @@ if __name__ == "__main__":
     #     left_on="activity_id",
     #     right_on="id",
     # )
-    #stream_table = pa.Table.from_pandas(stream_df, preserve_index=False)
-    #pq.write_table(stream_table, streams_save_file_path, flavor="spark")
+    # stream_table = pa.Table.from_pandas(stream_df, preserve_index=False)
+    # pq.write_table(stream_table, streams_save_file_path, flavor="spark")
 
-    l#ogging.info(f"Writing streams file {streams_save_file_path}")
+    # logging.info(f"Writing streams file {streams_save_file_path}")
