@@ -1,57 +1,57 @@
+import argparse
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 import boto3
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from dotenv import load_dotenv
 
-from globals import PERSONAL_BUCKET_NAME
-from utils import get_access_token, get_streamdata, list_s3_files
+from utils import (
+    generate_s3_path,
+    get_access_token,
+    get_streamdata,
+    list_s3_files,
+    setup_logging,
+)
 
 # loading variables from .env file
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
-
-access_token = get_access_token()
+setup_logging()
 
 
-import argparse
-from datetime import date, timedelta
-
-if __name__ == "__main__":
+def parse_args():
     parser = argparse.ArgumentParser(description="Fetch Strava stream data.")
     parser.add_argument("--start_date", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end_date", type=str, help="End date (YYYY-MM-DD)")
     parser.add_argument(
         "--since_date", type=str, help="Date since when to fetch data (YYYY-MM-DD)"
     )
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
-    start_date_str = args.start_date
-    end_date_str = args.end_date
-    since_date_str = args.since_date
+def main():
+    args = parse_args()
+    access_token = get_access_token()
 
-    if start_date_str and end_date_str:
-        start_date = date.fromisoformat(start_date_str)
-        end_date = date.fromisoformat(end_date_str)
-    elif since_date_str:
-        since_date = date.fromisoformat(since_date_str)
-        start_date = since_date
+    if args.start_date and args.end_date:
+        start_date = date.fromisoformat(args.start_date)
+        end_date = date.fromisoformat(args.end_date)
+    elif args.since_date:
+        start_date = date.fromisoformat(args.since_date)
         end_date = date.today()
     else:
         start_date = None
         end_date = None
 
     s3 = boto3.client("s3")
+    from globals import PERSONAL_BUCKET_NAME
 
-    streams_key_path = f'strava/streams/all_strava_streams_{datetime.now().strftime("%Y-%m-%d")}.parquet'
-    streams_save_file_path = f"s3://{PERSONAL_BUCKET_NAME}/" + streams_key_path
-
+    # This part gets the latest activity file to know which IDs to fetch
     activities_files = list_s3_files(s3, PERSONAL_BUCKET_NAME, "strava/activities/")
+    if not activities_files:
+        logging.error("No activity files found in S3.")
+        return
 
     file_dates = [
         datetime.strptime(
@@ -65,6 +65,7 @@ if __name__ == "__main__":
     activities_dataframe["start_date_local"] = pd.to_datetime(
         activities_dataframe["start_date_local"]
     )
+
     if start_date:
         activities_dataframe = activities_dataframe.query(
             "start_date_local.dt.date >= @start_date"
@@ -73,18 +74,15 @@ if __name__ == "__main__":
         activities_dataframe = activities_dataframe.query(
             "start_date_local.dt.date <= @end_date"
         )
+
     activity_ids = activities_dataframe["id"].drop_duplicates().to_list()
-    stream_df = get_streamdata(
-        s3_client=s3, access_token=access_token, activity_ids=activity_ids
-    )
+    if not activity_ids:
+        logging.info("No activities found for the specified date range.")
+        return
 
-    # joined_stream_df = pd.merge(
-    #     stream_df,
-    #     activities_dataframe[["sport_type", "id", "start_date_local", "name"]],
-    #     left_on="activity_id",
-    #     right_on="id",
-    # )
-    # stream_table = pa.Table.from_pandas(stream_df, preserve_index=False)
-    # pq.write_table(stream_table, streams_save_file_path, flavor="spark")
+    logging.info(f"Fetching streams for {len(activity_ids)} activities.")
+    get_streamdata(s3_client=s3, access_token=access_token, activity_ids=activity_ids)
 
-    # logging.info(f"Writing streams file {streams_save_file_path}")
+
+if __name__ == "__main__":
+    main()

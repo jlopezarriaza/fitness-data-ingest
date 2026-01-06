@@ -27,7 +27,46 @@ from globals import (
     TOKEN_URL,
 )
 
-logging.basicConfig(level=logging.INFO)
+def setup_logging(level=logging.INFO):
+    """Set up centralized logging configuration."""
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
+def generate_s3_path(
+    feature: str, activity_id: Optional[int] = None, extension: str = "parquet"
+) -> str:
+    """
+    Generate an S3 path for a given feature and optional activity_id.
+
+    Args:
+        feature (str): The feature name (e.g., 'activities', 'streams').
+        activity_id (Optional[int]): The specific activity ID for streams.
+        extension (str): The file extension, default is 'parquet'.
+
+    Returns:
+        str: The full S3 path including the bucket name.
+    """
+    from globals import PERSONAL_BUCKET_NAME
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    if feature == "streams" and activity_id is not None:
+        key = f"strava/streams/strava_stream_{activity_id}.{extension}"
+    elif feature == "streams":
+        key = f"strava/streams/all_strava_streams_{date_str}.{extension}"
+    elif feature == "activities":
+        key = f"strava/activities/all_strava_activities_{date_str}.{extension}"
+    else:
+        key = f"strava/{feature}/{feature}_{date_str}.{extension}"
+
+    return f"s3://{PERSONAL_BUCKET_NAME}/{key}"
+
+
+setup_logging()
 
 
 def get_activities_for_year(access_token: str, years: List[int]) -> List[dict]:
