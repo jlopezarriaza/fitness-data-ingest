@@ -334,21 +334,30 @@ def get_single_streamdata(
     streams_url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams?keys={','.join(keys)}"
 
     stream_data_response = requests.get(streams_url, headers=headers)
-    limit_15_min, limit_daily = [
-        int(val)
-        for val in stream_data_response.headers["x-readratelimit-limit"].split(",")
-    ]
-    usage_15_min, usage_dailyl = [
-        int(val)
-        for val in stream_data_response.headers["x-readratelimit-usage"].split(",")
-    ]
-    if limit_15_min - usage_15_min < 5:
-        logging.info("15 minute limit usage limit almost reached ... waiting")
-        time.sleep(15 * 60)
 
     if stream_data_response.status_code == 404:
         logging.info(stream_data_response.reason)
         return None
+
+    if "x-readratelimit-limit" in stream_data_response.headers:
+        limit_15_min, limit_daily = [
+            int(val)
+            for val in stream_data_response.headers["x-readratelimit-limit"].split(",")
+        ]
+        usage_15_min, usage_dailyl = [
+            int(val)
+            for val in stream_data_response.headers["x-readratelimit-usage"].split(",")
+        ]
+        if limit_15_min - usage_15_min < 5:
+            logging.info("15 minute limit usage limit almost reached ... waiting")
+            time.sleep(15 * 60)
+
+    if stream_data_response.status_code != 200:
+        logging.warning(
+            f"Error fetching stream data: {stream_data_response.status_code} - {stream_data_response.text}"
+        )
+        return None
+
     stream_data = stream_data_response.json()
     stream_df = (
         pd.DataFrame()

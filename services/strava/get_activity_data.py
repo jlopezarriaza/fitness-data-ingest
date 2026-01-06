@@ -20,7 +20,7 @@ def main():
     access_token = get_access_token()
 
     activities_data = get_activities_for_year(
-        access_token=access_token, years=range(2017, 2026)
+        access_token=access_token, years=range(2017, 2027)
     )
     # filtered_activities = [activity for activity in activities_data if (len(activity["map"]['summary_polyline'])>0) & (pd.to_datetime(activity['start_date']).year==2024)]
     activities_dataframe = pd.DataFrame(normalize_activities(activities_data))
